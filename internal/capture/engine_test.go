@@ -59,6 +59,40 @@ func TestDuplicateCapturedRequestIsIgnored(t *testing.T) {
 	}
 }
 
+func TestInferredQuantityUsesStableParameterOrder(t *testing.T) {
+	var events []Event
+	engine := NewEngine(DefaultOperationCodes(), 0, 1, func(event Event) { events = append(events, event) })
+	now := time.Now()
+	engine.HandleResponse(82, 0, map[byte]interface{}{0: []string{
+		`{"Id":91,"ItemTypeId":"T4_BAG","UnitPriceSilver":250000,"Amount":20,"AuctionType":"request"}`,
+	}}, now)
+	// Field 1 is absent.  The fallback must consistently prefer field 2 (3),
+	// rather than an arbitrary map entry such as field 4 (9).
+	engine.HandleRequest(88, map[byte]interface{}{0: int64(91), 4: int32(9), 2: int32(3)}, now)
+	engine.HandleResponse(88, 0, map[byte]interface{}{}, now.Add(time.Second))
+	if len(events) != 1 || events[0].Quantity != 3 || events[0].Confidence != "inferred" {
+		t.Fatalf("unexpected inferred event: %#v", events)
+	}
+}
+
+func TestSellSpecificItemUsesItsProtocolQuantityField(t *testing.T) {
+	var events []Event
+	engine := NewEngine(DefaultOperationCodes(), 0, 1, func(event Event) { events = append(events, event) })
+	now := time.Now()
+	engine.HandleResponse(82, 0, map[byte]interface{}{0: []string{
+		`{"Id":3183759429,"ItemTypeId":"T2_FURNITUREITEM_TROPHY_GENERAL","UnitPriceSilver":20000,"Amount":2120,"AuctionType":"request"}`,
+	}}, now)
+	// Operation 315: field 3 is unrelated metadata, while field 4 is the
+	// selected quantity.  This represents selling one trophy, not three.
+	engine.HandleRequest(228, map[byte]interface{}{
+		0: int32(6), 1: int64(3183759429), 2: int32(9684), 3: int32(3), 4: int32(1), 253: int64(315),
+	}, now)
+	engine.HandleResponse(228, 0, map[byte]interface{}{253: int64(315)}, now.Add(time.Second))
+	if len(events) != 1 || events[0].Quantity != 1 || events[0].Confidence != "confirmed" {
+		t.Fatalf("unexpected sell-specific event: %#v", events)
+	}
+}
+
 func TestSuccessfulInstantSaleIsEmitted(t *testing.T) {
 	var events []Event
 	engine := NewEngine(DefaultOperationCodes(), 0, 1, func(event Event) { events = append(events, event) })

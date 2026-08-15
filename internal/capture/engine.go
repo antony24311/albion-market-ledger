@@ -93,6 +93,7 @@ type pendingTrade struct {
 	Quantity    int64
 	RequestedAt time.Time
 	Confidence  string
+	RawParams   string
 }
 
 type mailInfo struct {
@@ -210,13 +211,24 @@ func (e *Engine) HandleRequest(opCode byte, params map[byte]interface{}, now tim
 		orders = e.requests
 		direction = "sell"
 	}
-	order, found := e.findOrderLocked(params, orders)
+	orderIDParam, quantityParam := e.orderIDParam, e.quantityParam
+	// AuctionSellSpecificItemRequest (315) uses a different parameter layout
+	// from AuctionSellRequest (88): order ID is field 1 and the selected count
+	// is field 4.  Treating field 3 as the count records its item metadata (3)
+	// instead of the one item the player actually sold.
+	if code == e.codes.AuctionSellSpecificItemRequest {
+		orderIDParam, quantityParam = 1, 4
+	}
+	order, found := e.findOrderLocked(params, orders, orderIDParam)
 	if !found {
 		go e.warning(direction+"_order_not_cached", "收到成交請求，但找不到先前市場清單中的訂單；本次未入帳", formatParams(params))
 		return
 	}
 
-	quantity, confidence := e.findQuantityLocked(params, order)
+	quantity, confidence := e.findQuantityLocked(params, order, orderIDParam, quantityParam)
+	if confidence == "inferred" {
+		go e.warning(direction+"_quantity_inferred", "成交數量不在預設參數欄位，已依固定欄位順序推測；請在同步中心核對此筆交易", formatParams(params))
+	}
 	fingerprint := fmt.Sprintf("%d:%d:%d", code, order.ID, quantity)
 	if previous, exists := e.recentRequests[fingerprint]; exists && now.Sub(previous) < time.Second {
 		return
@@ -224,6 +236,7 @@ func (e *Engine) HandleRequest(opCode byte, params map[byte]interface{}, now tim
 	e.recentRequests[fingerprint] = now
 	e.pending[code] = append(e.pending[code], pendingTrade{
 		Order: order, Quantity: quantity, RequestedAt: now, Confidence: confidence,
+		RawParams: formatParams(params),
 	})
 }
 
@@ -342,6 +355,8 @@ func (e *Engine) emitTrade(pending pendingTrade, direction, source, character, f
 		CharacterName: character, QualityLevel: pending.Order.QualityLevel,
 		EnchantmentLevel: pending.Order.EnchantmentLevel,
 		Source:           source, Confidence: pending.Confidence,
+		RawParams: fmt.Sprintf("request_params=%s; cached_order_amount=%d; internal_unit_price=%d",
+			pending.RawParams, pending.Order.Amount, pending.Order.UnitPrice),
 	})
 }
 
@@ -375,7 +390,8 @@ func (e *Engine) findQuickSellQuantityLocked(params map[byte]interface{}) (int64
 		return value, "confirmed"
 	}
 	var values []int64
-	for key, value := range params {
+	for _, key := range sortedParameterKeys(params) {
+		value := params[key]
 		if key != 252 && key != 253 {
 			collectIntegers(value, &values)
 		}
@@ -627,8 +643,8 @@ func (e *Engine) cacheOrders(rawOrders []string, buyRequests bool) {
 	}
 }
 
-func (e *Engine) findOrderLocked(params map[byte]interface{}, orders map[int64]MarketOrder) (MarketOrder, bool) {
-	if value, ok := asInt64(params[e.orderIDParam]); ok {
+func (e *Engine) findOrderLocked(params map[byte]interface{}, orders map[int64]MarketOrder, orderIDParam byte) (MarketOrder, bool) {
+	if value, ok := asInt64(params[orderIDParam]); ok {
 		if order, exists := orders[value]; exists {
 			return order, true
 		}
@@ -648,13 +664,14 @@ func (e *Engine) findOrderLocked(params map[byte]interface{}, orders map[int64]M
 	return MarketOrder{}, false
 }
 
-func (e *Engine) findQuantityLocked(params map[byte]interface{}, order MarketOrder) (int64, string) {
-	if value, ok := asInt64(params[e.quantityParam]); ok && value > 0 && value <= order.Amount {
+func (e *Engine) findQuantityLocked(params map[byte]interface{}, order MarketOrder, orderIDParam, quantityParam byte) (int64, string) {
+	if value, ok := asInt64(params[quantityParam]); ok && value > 0 && value <= order.Amount {
 		return value, "confirmed"
 	}
 	var values []int64
-	for key, value := range params {
-		if key == e.orderIDParam || key == 252 || key == 253 {
+	for _, key := range sortedParameterKeys(params) {
+		value := params[key]
+		if key == orderIDParam || key == 252 || key == 253 {
 			continue
 		}
 		collectIntegers(value, &values)
@@ -665,6 +682,18 @@ func (e *Engine) findQuantityLocked(params map[byte]interface{}, order MarketOrd
 		}
 	}
 	return 1, "inferred"
+}
+
+// Photon parameters are decoded into a Go map.  Map iteration is deliberately
+// random, so fallback inference must sort field keys before choosing a value.
+// Otherwise an identical sale packet can be recorded with different quantities.
+func sortedParameterKeys(params map[byte]interface{}) []byte {
+	keys := make([]byte, 0, len(params))
+	for key := range params {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	return keys
 }
 
 func (e *Engine) pruneLocked(now time.Time) {

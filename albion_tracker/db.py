@@ -262,8 +262,12 @@ class Database:
         if supplied is not None and not from_mail and not manual_total and not legacy_total and self._integer(event, "total_price") != total:
             raise ValidationError("total_price 必須等於 quantity × unit_price")
         settings = self.get_settings()
+        # Albion charges a higher tax for an immediate sale to an existing buy
+        # order.  The configurable market_tax_rate is for sell orders; using it
+        # for both paths made an instant sale at 8% appear as a 4% transaction.
         tax_rate = self._number(event, "sales_tax_rate") if event.get("sales_tax_rate") is not None else (
-            settings["market_tax_rate"] if direction == "sell" else 0)
+            8.0 if direction == "sell" and kind == "instant" else
+            (settings["market_tax_rate"] if direction == "sell" else 0))
         setup_rate = self._number(event, "setup_fee_rate") if event.get("setup_fee_rate") is not None else (
             settings["setup_fee_rate"] if kind == "order" else 0)
         if tax_rate >= 100 or setup_rate >= 100:

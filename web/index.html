@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Albion 市場帳本</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">A</span><div><strong>Albion</strong><small>市場帳本</small></div></div>
+      <nav class="primary-nav" aria-label="主要功能">
+        <button class="nav-button active" data-view="overview" type="button"><span>總覽</span><small>收支與趨勢</small></button>
+        <button class="nav-button" data-view="transactions" type="button"><span>成交帳本</span><small>買賣與三分鐘紀錄</small></button>
+        <button class="nav-button" data-view="projects" type="button"><span>製造專案</span><small>材料、專注與淨利</small></button>
+        <button class="nav-button" data-view="sync" type="button"><span>同步中心</span><small>捕捉器與市場郵件</small></button>
+      </nav>
+      <div class="sidebar-status"><span id="sidebar-status-dot" class="status-dot offline"></span><div><strong id="sidebar-status-title">等待捕捉器</strong><small>本機資料・不操作遊戲</small></div></div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div><p class="eyebrow">LOCAL MARKET LEDGER</p><h1 id="view-title">交易總覽</h1><p id="view-subtitle" class="subtitle">掌握成交、實收與專案淨利</p></div>
+        <div class="header-actions">
+          <span id="last-refresh">等待資料</span>
+          <label class="period-control">統計區間<select id="period-filter"><option value="day">近一天</option><option value="week">近一週</option><option value="month" selected>近一個月</option><option value="year">近一年</option><option value="all">全部</option></select></label>
+          <a class="button" href="/api/export.csv">匯出 CSV</a>
+        </div>
+      </header>
+
+      <section id="view-overview" class="view active">
+        <section class="status-panel" aria-label="監測狀態"><span id="status-dot" class="status-dot offline"></span><div><p id="status-title">等待捕捉器</p><p id="status-detail" class="muted">請先啟動 albion-capture</p></div><button class="button subtle jump-button" data-view="sync" type="button">查看同步狀態</button></section>
+        <section class="metrics" aria-label="總覽">
+          <article class="metric"><span>成交筆數</span><strong id="transactions">0</strong><small>已確認事件</small></article>
+          <article class="metric expense"><span>總投入</span><strong id="spent">0</strong><small>銀幣・含購入設定費</small></article>
+          <article class="metric income"><span>出售毛額</span><strong id="revenue">0</strong><small>實收 <b id="net-revenue">0</b></small></article>
+          <article class="metric balance"><span>淨現金流</span><strong id="balance">0</strong><small>出售實收 − 總投入</small></article>
+          <article class="metric"><span>買入數量</span><strong id="bought-quantity">0</strong><small>件</small></article>
+          <article class="metric"><span>賣出數量</span><strong id="sold-quantity">0</strong><small>件</small></article>
+        </section>
+        <section class="grid overview-grid">
+          <article class="panel chart-panel"><div class="panel-title"><div><p id="chart-period" class="eyebrow">LAST 30 DAYS</p><h2>期間收支</h2></div><div class="legend"><span class="spent-dot"></span>花費 <span class="revenue-dot"></span>出售</div></div><div id="daily-chart" class="chart"><p class="empty">還沒有成交資料</p></div></article>
+          <article class="panel"><div class="panel-title"><div><p class="eyebrow">TOP ITEMS</p><h2>主要交易品項</h2></div></div><ol id="top-items" class="ranking"><li class="empty">還沒有成交資料</li></ol></article>
+        </section>
+        <section class="panel quick-actions"><div><p class="eyebrow">QUICK START</p><h2>接下來要做什麼？</h2></div><div class="quick-action-grid">
+          <button class="quick-action jump-button" data-view="transactions" type="button"><strong>補記一筆成交</strong><span>管理買入、出售與掛單費用</span></button>
+          <button class="quick-action jump-button" data-view="projects" type="button"><strong>規劃製造材料</strong><span>展開多階配方、成本與預估淨利</span></button>
+          <button class="quick-action jump-button" data-view="sync" type="button"><strong>處理待驗證郵件</strong><span>只查看尚未讀取的市場訂單</span></button>
+        </div></section>
+      </section>
+
+      <section id="view-transactions" class="view">
+        <section class="panel recent-panel">
+          <div class="panel-title transactions-heading"><div><p class="eyebrow">LEDGER</p><h2>成交帳本</h2><p class="section-help">交易稅、設定費、毛額與實收分開顯示。</p></div><button id="add-transaction" class="button primary" type="button">＋ 手動補記</button></div>
+          <div class="toolbar" aria-label="成交篩選"><label>方向<select id="direction-filter"><option value="">全部</option><option value="buy">買入</option><option value="sell">賣出</option></select></label><label>類型<select id="kind-filter"><option value="">全部</option><option value="instant">立即成交</option><option value="order">訂單成交</option></select></label><label>品項類別<select id="category-filter"><option value="">全部</option></select></label><label class="check-label"><input id="show-sold" type="checkbox"> 顯示已封存</label></div>
+          <div class="table-wrap"><table class="transactions-table ledger-table"><thead><tr><th>時間</th><th>成交類型</th><th>品項</th><th>地點</th><th class="number">數量</th><th class="number">單價</th><th class="number">毛額</th><th class="number">費用</th><th class="number">實收／實付</th><th>狀態</th><th>操作</th></tr></thead><tbody id="ledger-rows"><tr><td colspan="11" class="empty">還沒有成交資料</td></tr></tbody></table></div>
+        </section>
+        <section class="panel snapshot-panel"><div class="panel-title"><div><p class="eyebrow">3-MINUTE SNAPSHOTS</p><h2>三分鐘收支紀錄</h2><p class="section-help">短時間大量成交會自動合併，方便回頭分批整理。</p></div></div><div class="table-wrap compact-table"><table><thead><tr><th>區間</th><th>品項明細</th><th class="number">筆數</th><th class="number">花費</th><th class="number">出售</th></tr></thead><tbody id="snapshot-rows"><tr><td colspan="5" class="empty">還沒有統計區間</td></tr></tbody></table></div></section>
+      </section>
+
+      <section id="view-projects" class="view">
+        <section class="panel project-builder refining-planner">
+          <div class="panel-title planner-heading"><div><p class="eyebrow">MULTI-STAGE REFINING</p><h2>多階精煉計算器</h2><p class="section-help">選擇成品與起始階級，系統自動展開完整配方、物品圖片、專注消耗與淨耗用量。</p></div><div class="project-create"><input id="project-name" maxlength="100" placeholder="會自動使用成品名稱＋數量"><button id="create-project" class="button primary" type="button">儲存為專案</button></div></div>
+          <div class="planner-layout">
+            <div class="planner-inputs">
+              <div class="selected-output"><img id="planner-output-icon" alt="成品圖示"><div><span>目標成品</span><strong id="planner-output-name">7.1 皮革</strong><small id="planner-output-id">自動載入物品代碼</small></div></div>
+              <div class="settings-grid recipe-settings">
+                <label>精煉品項<select id="recipe-family"><option value="leather">皮革</option><option value="cloth">布料</option><option value="metalbar">金屬錠</option><option value="planks">木板</option><option value="stoneblock">石塊</option></select></label>
+                <label>目標階級<select id="target-tier"><option value="4">4 階</option><option value="5">5 階</option><option value="6">6 階</option><option value="7" selected>7 階</option><option value="8">8 階</option></select></label>
+                <label>附魔<select id="enchantment"><option value="0">.0</option><option value="1" selected>.1</option><option value="2">.2</option><option value="3">.3</option><option value="4">.4</option></select></label>
+                <label>起始精煉品<select id="start-tier"><option value="2">2.0</option><option value="3">3.0</option><option value="4">4.1</option><option value="5" selected>5.1</option><option value="6">6.1</option></select><small>4 階以上會沿用目標附魔</small></label>
+                <label>目標數量<input id="target-output" type="number" min="1" value="100"></label>
+                <label>一般回報率 %<input id="return-rate" type="number" min="0" max="99.99" step="0.1" value="36.7"></label>
+                <label class="check-label focus-toggle"><input id="use-focus" type="checkbox"> 使用專注點</label>
+                <label>專注回報率 %<input id="focus-return-rate" type="number" min="0" max="99.99" step="0.1" value="53.9"></label>
+                <label>目前專注點<input id="available-focus" type="number" min="0" value="0"></label>
+                <label>市場伺服器<select id="market-server"><option value="east" selected>亞洲</option><option value="west">美洲</option><option value="europe">歐洲</option></select></label>
+                <label>市場城市<select id="market-location"><option value="Martlock">馬特洛克 (Martlock)</option><option value="Lymhurst">林姆赫斯特 (Lymhurst)</option><option value="Bridgewatch">橋望城 (Bridgewatch)</option><option value="Fort Sterling">斯特靈堡 (Fort Sterling)</option><option value="Thetford">塞特福德 (Thetford)</option><option value="Caerleon">卡利昂 (Caerleon)</option><option value="Brecilien">布雷西利恩 (Brecilien)</option><option value="Black Market">黑市 (Black Market)</option></select></label>
+                <label>出售費率 %<input id="sale-fee-rate" type="number" min="0" max="99.99" step="0.1" value="4"></label>
+                <label>額外成本<input id="extra-cost" type="number" min="0" value="0"></label>
+                <label>市場成交推估單價<input id="target-sale-price" type="number" min="0" value="0"><small id="target-price-source">非遊戲內「預估市值」；尚未取得市場資料</small></label>
+              </div>
+              <div class="planner-actions"><button id="fetch-market-prices" class="button" type="button">更新市場推估價</button><label class="check-label"><input id="auto-allocate-materials" type="checkbox" checked> 儲存時自動分配相符的購入紀錄</label><span id="market-price-status" class="muted">可手動輸入價格；市場資料只在按下時更新</span></div>
+            </div>
+            <aside class="plan-totals" aria-label="成本與收益摘要">
+              <p class="eyebrow">PROJECTED RESULT</p><h3 id="plan-decision">等待計算</h3>
+              <dl><div><dt>原物料</dt><dd id="plan-material-cost">0</dd></div><div><dt>製作台費</dt><dd id="plan-station-cost">0</dd></div><div><dt>預估總成本</dt><dd id="plan-total-cost">0</dd></div><div><dt>出售實收</dt><dd id="plan-revenue">0</dd></div><div class="profit-line"><dt>預估淨利</dt><dd id="plan-profit">0</dd></div></dl>
+              <p id="plan-focus-summary" class="muted">未使用專注點</p>
+            </aside>
+          </div>
+          <div class="recipe-chain"><div class="subsection-heading"><div><p class="eyebrow">RECIPE CHAIN</p><h3>合成路徑、製作台費與專注</h3></div><p>製作費與每件專注請依遊戲畫面覆寫；輸入完整數字後才重新展開配方。</p></div><div id="refining-steps" class="refining-steps"><p class="empty">正在載入配方…</p></div></div>
+          <div class="material-costs"><div class="subsection-heading"><div><p class="eyebrow">MATERIAL READINESS</p><h3>需要準備的材料</h3></div><p>開工需備用來判斷能否製作；淨耗用用來估算實際成本。</p></div><div class="table-wrap"><table><thead><tr><th>品項</th><th class="number">開工需備</th><th class="number">預估淨耗用</th><th>帳本／額外庫存</th><th class="number">尚缺</th><th class="number">單價</th><th class="number">預估成本</th><th>價格來源</th></tr></thead><tbody id="planner-material-rows"><tr><td colspan="8" class="empty">正在計算材料…</td></tr></tbody></table></div></div>
+          <p id="planner-note" class="planner-note">遊戲會按批次近似回報率返還材料；「開工需備」採配方毛投入，「預估淨耗用」採保守整數估算。</p>
+          <p id="project-message" class="form-message muted">可先建立純規劃專案，之後再從下方加入實際購入與出售紀錄。</p>
+        </section>
+
+        <section class="panel enchant-comparator">
+          <div class="panel-title"><div><p class="eyebrow">THREE-WAY COMPARISON</p><h2>原料轉換／直購比較器</h2><p class="section-help">同時比較「低一階同附魔」、「同階升附魔」與直接購買；例如 5.1→6.1、6.0→6.1、直購 6.1。</p></div><button id="fetch-compare-prices" class="button" type="button">更新三條路徑市場價</button></div>
+          <div class="compare-toolbar">
+            <div class="compare-item"><img id="compare-output-icon" alt="目標原料圖示"><div><span id="compare-output-name">6.1 礦石</span><small id="compare-output-id">自動載入</small></div></div>
+            <div class="settings-grid compare-settings">
+              <label>原料<select id="compare-family"><option value="cloth">纖維</option><option value="leather">粗皮</option><option value="metalbar" selected>礦石</option><option value="planks">原木</option></select></label>
+              <label>目標階級<select id="compare-tier"><option value="4">4 階</option><option value="5">5 階</option><option value="6" selected>6 階</option><option value="7">7 階</option><option value="8">8 階</option></select></label>
+              <label>目標附魔<select id="compare-enchantment"><option value="1" selected>.1</option><option value="2">.2</option><option value="3">.3</option><option value="4">.4</option></select></label>
+              <label>數量<input id="compare-quantity" type="number" min="1" value="1"></label>
+              <label>價格伺服器<select id="compare-market-server"><option value="east" selected>亞洲</option><option value="west">美洲</option><option value="europe">歐洲</option></select></label>
+              <label>價格市場<select id="compare-market-location"><option value="Martlock">馬特洛克 (Martlock)</option><option value="Lymhurst">林姆赫斯特 (Lymhurst)</option><option value="Bridgewatch">橋望城 (Bridgewatch)</option><option value="Fort Sterling">斯特靈堡 (Fort Sterling)</option><option value="Thetford">塞特福德 (Thetford)</option><option value="Caerleon">卡利昂 (Caerleon)</option><option value="Brecilien">布雷西利恩 (Brecilien)</option><option value="Black Market">黑市 (Black Market)</option></select></label>
+            </div>
+          </div>
+          <div id="compare-routes" class="compare-routes"><p class="empty">正在建立比較路徑…</p></div>
+          <p id="compare-note" class="planner-note">銀幣費預填官方基準；不同製作台可能顯示不同實付金額，請以遊戲畫面覆寫。市場缺少即時賣價時會改用最近 14 個有成交日的加權均價。</p>
+        </section>
+
+        <section class="panel allocation-panel"><div class="panel-title"><div><p class="eyebrow">ALLOCATIONS</p><h2>分配成交到專案</h2><p class="section-help">勾選材料購入與成品出售，可讓專案持續計算實際淨利。</p></div></div><div class="table-wrap"><table class="transactions-table"><thead><tr><th>選取／數量</th><th>時間</th><th>成交類型</th><th>品項</th><th>類別</th><th>地點</th><th class="number">成交／可分配</th><th class="number">單價</th><th class="number">總額</th><th>狀態</th><th>操作</th></tr></thead><tbody id="transaction-rows"><tr><td colspan="11" class="empty">還沒有成交資料</td></tr></tbody></table></div></section>
+        <section class="panel"><div class="panel-title"><div><p class="eyebrow">ACTIVE PROJECTS</p><h2>專案清單</h2></div></div><div id="projects" class="projects"><p class="empty">尚未建立專案</p></div></section>
+      </section>
+
+      <section id="view-sync" class="view">
+        <section class="status-panel" aria-label="同步狀態"><span id="sync-status-dot" class="status-dot offline"></span><div><p id="sync-status-title">等待捕捉器</p><p id="sync-status-detail" class="muted">啟動捕捉器後會自動載入市場郵件清單</p></div></section>
+        <section class="sync-metrics"><article><span>市場郵件</span><strong id="mail-total">0</strong></article><article class="pending"><span>待開啟內容</span><strong id="mail-pending">0</strong></article><article class="success"><span>成交／部分成交</span><strong id="mail-completed">0</strong></article><article><span>零成交</span><strong id="mail-no-trade">0</strong></article><article class="error"><span>解析失敗</span><strong id="mail-errors">0</strong></article></section>
+        <section class="sync-grid">
+          <article class="panel mail-panel"><div class="panel-title"><div><p class="eyebrow">MAIL VERIFICATION</p><h2>市場信箱交叉驗證</h2><p class="section-help">郵件清單會自動出現；只有品項、數量與價格需要遊戲送出郵件內容。</p></div><label>狀態<select id="mail-filter"><option value="">全部</option><option value="pending">待開啟內容</option><option value="completed">成交</option><option value="partial">部分成交</option><option value="no_trade">零成交</option><option value="parse_error">解析失敗</option></select></label></div><div class="sync-explanation"><strong>為什麼不能完全免點？</strong><span>被動封包只會收到郵件清單；在你開啟市場郵件前，遊戲不會把品項、數量和價格送到電腦。工具不會主動偽造讀信請求。</span></div><div class="table-wrap compact-table"><table><thead><tr><th>時間</th><th>訂單結果</th><th>地點</th><th>成交內容</th><th>驗證</th></tr></thead><tbody id="mail-rows"><tr><td colspan="5" class="empty">尚未收到市場信件</td></tr></tbody></table></div></article>
+          <article class="panel settings-panel"><div class="panel-title"><div><p class="eyebrow">ORDER FEES</p><h2>掛單費率</h2><p class="section-help">套用到之後捕捉或手動新增的交易。</p></div></div><div class="fee-form"><label>交易稅 %<input id="market-tax-rate" type="number" min="0" max="99.99" step="0.1" value="4"></label><label>設定費 %<input id="setup-fee-rate" type="number" min="0" max="99.99" step="0.1" value="2.5"></label><button id="save-fees" class="button primary" type="button">儲存費率</button></div></article>
+        </section>
+        <section id="warning-panel" class="panel warning-panel hidden"><div class="panel-title"><div><p class="eyebrow">CAPTURE NOTES</p><h2>需要注意</h2></div></div><ul id="warnings"></ul></section>
+        <section class="panel sync-note"><p><strong>離線掛單：</strong>下線期間完成的訂單，會在下次登入載入郵件清單後顯示為「待開啟內容」。完全失敗或零成交的到期訂單不會寫入成交帳本。</p></section>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="transaction-dialog"><form id="transaction-form"><div class="dialog-title"><h2 id="transaction-dialog-title">手動補記成交</h2><button class="icon-button dialog-close" type="button">關閉</button></div><input id="edit-transaction-id" type="hidden"><input id="manual-item-id" type="hidden" required><input id="manual-item-name" type="hidden">
+    <section class="manual-item-picker"><div class="picker-heading"><div><span>點選品項，不用輸入代碼</span><strong id="manual-selected-item">尚未選擇品項</strong></div><img id="manual-selected-icon" alt="已選品項圖示"></div><div id="manual-recent-items" class="manual-recent-items"></div><div class="picker-filters"><label>種類<select id="manual-picker-family"><option value="leather">皮革／粗皮</option><option value="cloth">布料／纖維</option><option value="metalbar" selected>金屬錠／礦石</option><option value="planks">木板／原木</option><option value="stoneblock">石塊／石材</option></select></label><label>原料／成品<select id="manual-picker-kind"><option value="raw">原始材料</option><option value="refined">精煉成品</option></select></label><label>階級<select id="manual-picker-tier"><option value="4">4</option><option value="5">5</option><option value="6" selected>6</option><option value="7">7</option><option value="8">8</option></select></label></div><div id="manual-item-grid" class="manual-item-grid"></div><details><summary>進階：直接輸入特殊品項代碼</summary><div class="advanced-item-fields"><label>品項代碼<input id="manual-custom-item-id" placeholder="例如 T4_BAG"></label><label>顯示名稱<input id="manual-custom-item-name" placeholder="例如 4 階背包"></label><button id="apply-custom-item" class="button" type="button">套用品項</button></div></details></section><div class="settings-grid">
+    <label>方向<select id="manual-direction"><option value="buy">購入</option><option value="sell">出售</option></select></label><label>類型<select id="manual-kind"><option value="instant">立即成交</option><option value="order">訂單成交</option></select></label><label>手動來源<select id="manual-source"><option value="manual_entry">一般補記</option><option value="private_trade">私下交易</option><option value="storage_inventory">儲物箱既有庫存</option></select></label><label>數量<input id="manual-quantity" required type="number" min="1" value="1"></label><label>總成交金額<input id="manual-total-price" required type="number" min="0" value="0"><small>例如 100M 請輸入 100000000</small></label><label>自動換算單價<input id="manual-unit-price" required type="number" min="0" value="0"></label><label>交易地點<select id="manual-location"><option value="">不指定／私下交易</option><option value="3008">馬特洛克 (Martlock)</option><option value="1002">林姆赫斯特 (Lymhurst)</option><option value="2004">橋望城 (Bridgewatch)</option><option value="4002">斯特靈堡 (Fort Sterling)</option><option value="0007">塞特福德 (Thetford)</option><option value="3005">卡利昂 (Caerleon)</option><option value="5003">布雷西利恩 (Brecilien)</option></select></label><label>成交時間<input id="manual-traded-at" type="datetime-local"></label><label>交易稅 %<input id="manual-tax-rate" type="number" min="0" max="99.99" step="0.1"></label><label>設定費 %<input id="manual-setup-rate" type="number" min="0" max="99.99" step="0.1"></label><label class="wide">備註<input id="manual-notes" placeholder="例如：私下收購 100M／儲物箱成本不明"></label>
+  </div><p id="transaction-message" class="form-message muted"></p><div class="dialog-actions"><button class="button dialog-close" type="button">取消</button><button class="button primary" type="submit">儲存</button></div></form></dialog>
+  <script src="/app.js" defer></script>
+</body>
+</html>

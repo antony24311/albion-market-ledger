@@ -33,6 +33,7 @@ type config struct {
 	listDevices       bool
 	offlinePCAP       string
 	spoolPath         string
+	logPath           string
 	clientID          string
 	orderIDParam      int
 	quantityParam     int
@@ -76,6 +77,17 @@ type statusEvent struct {
 
 func main() {
 	cfg := parseFlags()
+	if cfg.logPath != "" {
+		if err := os.MkdirAll(filepath.Dir(cfg.logPath), 0755); err != nil {
+			log.Fatal(err)
+		}
+		file, err := os.OpenFile(cfg.logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer file.Close()
+		log.SetOutput(file)
+	}
 	if cfg.listDevices {
 		if err := printDevices(); err != nil {
 			log.Fatal(err)
@@ -150,6 +162,7 @@ func parseFlags() config {
 	flag.BoolVar(&cfg.listDevices, "list-devices", false, "列出可用網路介面後結束")
 	flag.StringVar(&cfg.offlinePCAP, "pcap", "", "解析離線 .pcap，而非即時監聽")
 	flag.StringVar(&cfg.spoolPath, "spool", filepath.Join("data", "capture-spool.jsonl"), "API 離線時的 JSONL 佇列")
+	flag.StringVar(&cfg.logPath, "log", "", "將捕捉器日誌附加寫入指定檔案")
 	flag.StringVar(&cfg.clientID, "client-id", hostname, "顯示在統計頁面的捕捉器名稱")
 	flag.IntVar(&cfg.orderIDParam, "order-id-param", 0, "AuctionBuyOffer 的訂單 ID 參數索引")
 	flag.IntVar(&cfg.quantityParam, "quantity-param", 1, "AuctionBuyOffer 的數量參數索引")

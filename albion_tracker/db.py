@@ -463,10 +463,10 @@ class Database:
 
     def list_market_mails(self, limit: int = 100) -> list[dict[str, Any]]:
         with self.connect() as db:
-            rows = db.execute("""SELECT m.*,t.direction,t.item_id,COALESCE(c.name_zh_tw,t.item_name) item_name,
+            rows = db.execute(r"""SELECT m.*,t.direction,t.item_id,COALESCE(c.name_zh_tw,t.item_name) item_name,
                 t.quantity,t.total_price,t.net_total,t.sales_tax,t.setup_fee FROM market_mails m
                 LEFT JOIN transactions t ON t.id=m.transaction_id LEFT JOIN item_catalog c ON c.item_id=t.item_id
-                WHERE m.mail_type LIKE 'MARKETPLACE\_%' ESCAPE '\\' OR m.mail_type LIKE 'BLACKMARKET\_%' ESCAPE '\\'
+                WHERE m.mail_type GLOB 'MARKETPLACE_*' OR m.mail_type GLOB 'BLACKMARKET_*'
                 ORDER BY COALESCE(m.received_at,m.captured_at) DESC LIMIT ?""",(min(max(int(limit),1),500),)).fetchall()
         result=[]
         for row in rows:

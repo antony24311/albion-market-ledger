@@ -58,6 +58,26 @@ cd albion-market-ledger
 
 ## Windows 10／11
 
+### Windows 桌面 App（推薦）
+
+一般使用者可直接下載 GitHub Actions 產生的 `AlbionMarketLedger.exe`。雙擊並允許 Windows
+系統管理員權限後，App 會自動啟動本機帳本服務、Npcap 擷取器及獨立的帳本視窗；不需要安裝
+Python、Go，也不需要開啟 PowerShell。關閉帳本視窗時，擷取器會一併停止。
+
+首次使用仍需安裝 [Npcap](https://npcap.com/) 並勾選 **WinPcap API-compatible Mode**。
+帳本資料與日誌會保存在 `%LOCALAPPDATA%\AlbionMarketLedger`，更新 App 不會覆蓋資料。
+
+開發者可自行建置單一 EXE：
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\build-windows-app.ps1
+```
+
+輸出檔位於 `dist\AlbionMarketLedger.exe`。
+
+### 傳統腳本啟動
+
 1. 安裝 [Python 3.10 以上](https://www.python.org/downloads/windows/)，安裝時勾選 **Add Python to PATH**。
 2. 安裝 [Npcap](https://npcap.com/windows-10)，勾選 **WinPcap API-compatible Mode**。
 3. 在專案資料夾空白處按 Shift＋滑鼠右鍵，選擇「在終端機中開啟」，執行：

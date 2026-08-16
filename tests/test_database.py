@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 from albion_tracker.db import Database, ValidationError
@@ -174,6 +175,57 @@ class DatabaseTests(unittest.TestCase):
         mail = self.database.list_market_mails()[0]
         self.assertEqual(mail["state"], "completed")
         self.assertEqual(mail["transaction_id"], transaction_id)
+
+    def test_mail_import_cutoff_filters_old_mail_events(self):
+        self.database.update_settings({"mail_import_after": "2026-08-15T00:00:00Z"})
+        old_received = int(datetime(2026, 8, 14, 12, tzinfo=timezone.utc).timestamp())
+        new_received = int(datetime(2026, 8, 16, 12, tzinfo=timezone.utc).timestamp())
+        self.assertFalse(self.database.upsert_mail_metadata({
+            "mail_id": 1001, "mail_type": "MARKETPLACE_SELLORDER_FINISHED_SUMMARY",
+            "mail_received": old_received,
+        }))
+        inserted, row_id = self.database.insert_transaction({
+            "type": "transaction", "source_event_id": "mail:1001", "mail_id": 1001,
+            "mail_type": "MARKETPLACE_SELLORDER_FINISHED_SUMMARY",
+            "mail_received": old_received, "traded_at": "2026-08-14T12:00:00Z",
+            "direction": "sell", "transaction_kind": "order", "item_id": "T2_LEATHER",
+            "quantity": 1, "unit_price": 10, "source": "sell_order_mail",
+        })
+        self.assertFalse(inserted)
+        self.assertEqual(row_id, 0)
+        self.assertTrue(self.database.upsert_mail_metadata({
+            "mail_id": 1002, "mail_type": "MARKETPLACE_SELLORDER_FINISHED_SUMMARY",
+            "mail_received": new_received,
+        }))
+        inserted, _ = self.database.insert_transaction({
+            "type": "transaction", "source_event_id": "mail:1002", "mail_id": 1002,
+            "mail_type": "MARKETPLACE_SELLORDER_FINISHED_SUMMARY",
+            "mail_received": new_received, "traded_at": "2026-08-16T12:00:00Z",
+            "direction": "sell", "transaction_kind": "order", "item_id": "T2_LEATHER",
+            "quantity": 1, "unit_price": 10, "source": "sell_order_mail",
+        })
+        self.assertTrue(inserted)
+        self.assertEqual([mail["mail_id"] for mail in self.database.list_market_mails()], [1002])
+
+    def test_clear_ledger_preserves_settings_and_item_catalog(self):
+        self.database.update_settings({"mail_import_after": "2026-08-15T00:00:00Z"})
+        self.database.cache_item_names({"T4_BAG": "測試背包"})
+        _, transaction_id = self.database.insert_purchase(self.purchase())
+        self.database.create_project("待清空專案", [{"transaction_id": transaction_id, "quantity": 1}])
+        self.database.upsert_mail_metadata({
+            "mail_id": 1003, "mail_type": "MARKETPLACE_SELLORDER_FINISHED_SUMMARY",
+            "mail_received": int(datetime(2026, 8, 16, 12, tzinfo=timezone.utc).timestamp()),
+        })
+        deleted = self.database.clear_ledger()
+        self.assertEqual(deleted["transactions"], 1)
+        self.assertEqual(deleted["projects"], 1)
+        self.assertEqual(deleted["mails"], 1)
+        self.assertEqual(self.database.list_transactions(include_sold=True, include_deleted=True), [])
+        self.assertEqual(self.database.list_projects(), [])
+        self.assertEqual(self.database.list_market_mails(), [])
+        self.assertEqual(self.database.list_snapshots(), [])
+        self.assertEqual(self.database.get_settings()["mail_import_after"], "2026-08-15T00:00:00Z")
+        self.assertEqual(self.database.catalog_names(["T4_BAG"])["T4_BAG"], "測試背包")
 
     def test_multi_material_focus_shortage_calculator(self):
         material = self.purchase()

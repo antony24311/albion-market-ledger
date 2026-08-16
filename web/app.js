@@ -5,7 +5,7 @@ const state = { transactions: [], projects: [], selected: new Map(), refreshing:
   plannerPrices: {}, plannerPriceSources: {}, plannerInventory: {}, stationFees: {}, focusCosts: {}, planTimer: null, planRequest: 0,
   targetPriceSource: '尚未取得市場資料', transmutationPlan: null, comparePrices: {}, comparePriceSources: {}, compareFees: {}, compareTimer: null, compareRequest: 0,
   autoProjectName: '',
-  settings: { market_tax_rate: 4, setup_fee_rate: 2.5 }, settingsLoaded: false };
+  settings: { market_tax_rate: 4, setup_fee_rate: 2.5, mail_import_after: null }, settingsLoaded: false };
 
 const byId = id => document.getElementById(id);
 const text = (id, value) => { byId(id).textContent = value; };
@@ -738,6 +738,36 @@ async function saveFees() {
   } catch (error) { window.alert(error.message); }
 }
 
+function localDateFromISO(value) {
+  if (!value) return '';
+  const date=new Date(value), local=new Date(date.getTime()-date.getTimezoneOffset()*60000);
+  return local.toISOString().slice(0,10);
+}
+
+async function saveMailCutoff() {
+  const date=formValue('mail-import-after');
+  const mailImportAfter=date ? new Date(`${date}T00:00:00`).toISOString() : null;
+  try {
+    const response=await fetch('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({mail_import_after:mailImportAfter})});
+    const result=await response.json(); if (!response.ok) throw new Error(result.error || '郵件起始日儲存失敗');
+    state.settings=result.settings;
+    window.alert(date ? `之後只會將 ${date}（含）以後的市場郵件寫入帳本。` : '已取消郵件日期限制。');
+  } catch (error) { window.alert(error.message); }
+}
+
+async function clearLedger() {
+  if (!window.confirm('這會永久刪除所有成交、專案、郵件與收支快照。是否繼續？')) return;
+  if (window.prompt('最後確認：請輸入「清空」') !== '清空') { window.alert('確認文字不符，未清空帳本。'); return; }
+  try {
+    const response=await fetch('/api/ledger',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmation:'CLEAR_LEDGER'})});
+    const result=await response.json(); if (!response.ok) throw new Error(result.error || '清空帳本失敗');
+    state.selected.clear(); state.editingProject=null; state.pendingProjectSale=null;
+    const deleted=result.deleted || {};
+    window.alert(`帳本已清空：${deleted.transactions || 0} 筆成交、${deleted.projects || 0} 個專案、${deleted.mails || 0} 封市場郵件。`);
+    await refresh();
+  } catch (error) { window.alert(error.message); }
+}
+
 async function setTransactionStatus(item) {
   const status = item.status === 'sold' ? 'active' : 'sold';
   const response = await fetch(`/api/transactions/${item.id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({status}) });
@@ -769,7 +799,7 @@ async function refresh() {
     const [summary, transactions, snapshots, projects, mails, settings] = await Promise.all(responses.map(x => x.json()));
     state.transactions = transactions.items; await resolveNames(state.transactions);
     state.settings=settings;
-    if (!state.settingsLoaded) { byId('market-tax-rate').value=settings.market_tax_rate; byId('setup-fee-rate').value=settings.setup_fee_rate; state.settingsLoaded=true; }
+    if (!state.settingsLoaded) { byId('market-tax-rate').value=settings.market_tax_rate; byId('setup-fee-rate').value=settings.setup_fee_rate; byId('mail-import-after').value=localDateFromISO(settings.mail_import_after); state.settingsLoaded=true; }
     text('transactions', formatNumber.format(summary.totals.transactions)); text('bought-quantity', formatNumber.format(summary.totals.bought_quantity));
     text('sold-quantity', formatNumber.format(summary.totals.sold_quantity)); text('spent', formatNumber.format(summary.totals.spent));
     text('revenue', formatNumber.format(summary.totals.revenue)); text('net-revenue', formatNumber.format(summary.totals.net_revenue)); text('balance', formatNumber.format(summary.totals.balance));
@@ -789,6 +819,7 @@ byId('mail-filter').addEventListener('change',() => renderMails(state.mails));
 document.querySelectorAll('.nav-button,.jump-button').forEach(button => button.addEventListener('click',() => showView(button.dataset.view)));
 byId('create-project').addEventListener('click',saveProject); byId('add-transaction').addEventListener('click',() => openTransactionDialog());
 byId('save-fees').addEventListener('click',saveFees);
+byId('save-mail-cutoff').addEventListener('click',saveMailCutoff); byId('clear-ledger').addEventListener('click',clearLedger);
 ['recipe-family','target-tier','enchantment','start-tier','target-output','return-rate','focus-return-rate','available-focus','use-focus']
   .forEach(id => { byId(id).addEventListener('input',schedulePlannerUpdate); byId(id).addEventListener('change',schedulePlannerUpdate); });
 ['extra-cost','sale-fee-rate'].forEach(id => byId(id).addEventListener('input',updatePlanTotals));

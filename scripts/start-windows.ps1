@@ -2,8 +2,8 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $Capture = Join-Path $ProjectRoot "bin\albion-capture-windows-amd64.exe"
 
-if (-not (Test-Path $Capture)) {
-    throw "找不到 $Capture，請先執行 scripts\build-windows.ps1"
+if (-not (Test-Path -LiteralPath $Capture)) {
+    throw "Capture executable not found: $Capture. Run scripts\build-windows.ps1 first."
 }
 
 $Python = Get-Command py -ErrorAction SilentlyContinue
@@ -12,7 +12,7 @@ if ($Python) {
     $PythonArgs = "-3 -m albion_tracker serve"
 } else {
     $Python = Get-Command python -ErrorAction SilentlyContinue
-    if (-not $Python) { throw "需要 Python 3.10 以上版本" }
+    if (-not $Python) { throw "Python 3.10 or newer is required." }
     $PythonExe = $Python.Source
     $PythonArgs = "-m albion_tracker serve"
 }
@@ -24,12 +24,12 @@ try {
 } catch {}
 
 if ($ServerRunning) {
-    Write-Host "沿用已啟動的統計服務。"
+    Write-Host "Tracker is already running at http://127.0.0.1:8765"
 } else {
     Start-Process -FilePath $PythonExe -ArgumentList $PythonArgs -WorkingDirectory $ProjectRoot
     Start-Sleep -Seconds 2
 }
-Start-Process "http://127.0.0.1:8765"
 
-Write-Host "統計頁面已啟動。接下來 Windows 會詢問系統管理員權限，以讀取本機網路封包。"
+Start-Process "http://127.0.0.1:8765"
+Write-Host "Tracker is ready. Approve the UAC prompt to start packet capture; keep the capture window open."
 Start-Process -FilePath $Capture -WorkingDirectory $ProjectRoot -Verb RunAs

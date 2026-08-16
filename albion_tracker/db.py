@@ -38,6 +38,20 @@ def _snapshot_bounds(value: str) -> tuple[str, str]:
     return tuple(x.isoformat(timespec="seconds").replace("+00:00", "Z") for x in (start, end))
 
 
+def _mail_datetime(value: Any) -> datetime | None:
+    """Convert Albion's .NET/Unix mail timestamp formats to UTC."""
+    try:
+        raw = int(value or 0)
+        if raw > 621355968000000000:
+            return datetime.fromtimestamp((raw - 621355968000000000) / 10_000_000, timezone.utc)
+        if raw > 1_000_000_000:
+            divisor = 1000 if raw > 1_000_000_000_000 else 1
+            return datetime.fromtimestamp(raw / divisor, timezone.utc)
+    except (OverflowError, OSError, TypeError, ValueError):
+        pass
+    return None
+
+
 class ValidationError(ValueError):
     pass
 
@@ -157,7 +171,7 @@ class Database:
             self._migrate_purchases(db)
             db.execute("UPDATE transactions SET net_total=total_price WHERE net_total=0 AND total_price>0")
             db.execute("UPDATE market_mails SET state='completed' WHERE state='verified'")
-            for key,value in (("market_tax_rate","4"),("setup_fee_rate","2.5")):
+            for key,value in (("market_tax_rate","4"),("setup_fee_rate","2.5"),("mail_import_after","")):
                 db.execute("INSERT OR IGNORE INTO app_settings VALUES(?,?,?)",(key,value,utc_now()))
             self._repair_legacy_allocations(db)
             self._rebuild_snapshots(db)
@@ -282,6 +296,8 @@ class Database:
             _parse_datetime(traded_at)
         except (TypeError, ValueError) as error:
             raise ValidationError("traded_at 必須是有效日期時間") from error
+        if from_mail and not self._mail_import_allowed(event, settings.get("mail_import_after"), traded_at):
+            return False, 0
         status = self._optional_text(event, "status") or "active"
         if status not in STATUSES:
             raise ValidationError("status 必須是 active 或 sold")
@@ -367,14 +383,43 @@ class Database:
                 (self._optional_text(event,"source_event_id"),self._optional_text(event,"captured_at") or utc_now(),
                  self._required_text(event,"code"),self._required_text(event,"message"),json.dumps(event,ensure_ascii=False)))
 
-    def get_settings(self) -> dict[str, float]:
+    @staticmethod
+    def _mail_import_allowed(event: dict[str, Any], cutoff: Any, fallback: str | None = None) -> bool:
+        if not cutoff:
+            return True
+        received = _mail_datetime(event.get("mail_received"))
+        if received is None:
+            for field in ("traded_at", "purchased_at", "sold_at"):
+                raw = event.get(field)
+                if raw:
+                    try:
+                        received = _parse_datetime(str(raw))
+                        break
+                    except (TypeError, ValueError):
+                        pass
+        if received is None and fallback:
+            try:
+                received = _parse_datetime(fallback)
+            except (TypeError, ValueError):
+                pass
+        return received is not None and received >= _parse_datetime(str(cutoff))
+
+    def get_settings(self) -> dict[str, Any]:
         with self.connect() as db:
             rows = db.execute("SELECT key,value FROM app_settings").fetchall()
-        values = {row["key"]: float(row["value"]) for row in rows}
-        return {"market_tax_rate": values.get("market_tax_rate", 4.0),
-                "setup_fee_rate": values.get("setup_fee_rate", 2.5)}
+        values = {row["key"]: row["value"] for row in rows}
+        try:
+            market_tax_rate = float(values.get("market_tax_rate", 4.0))
+        except (TypeError, ValueError):
+            market_tax_rate = 4.0
+        try:
+            setup_fee_rate = float(values.get("setup_fee_rate", 2.5))
+        except (TypeError, ValueError):
+            setup_fee_rate = 2.5
+        return {"market_tax_rate": market_tax_rate, "setup_fee_rate": setup_fee_rate,
+                "mail_import_after": values.get("mail_import_after") or None}
 
-    def update_settings(self, values: dict[str, Any]) -> dict[str, float]:
+    def update_settings(self, values: dict[str, Any]) -> dict[str, Any]:
         current = self.get_settings()
         for key in ("market_tax_rate", "setup_fee_rate"):
             if key in values:
@@ -382,23 +427,31 @@ class Database:
                 if rate >= 100:
                     raise ValidationError("稅率與設定費率必須小於 100%")
                 current[key] = rate
+        if "mail_import_after" in values:
+            raw_cutoff = values.get("mail_import_after")
+            if raw_cutoff is None or str(raw_cutoff).strip() == "":
+                current["mail_import_after"] = None
+            else:
+                try:
+                    cutoff = _parse_datetime(str(raw_cutoff).strip())
+                except (TypeError, ValueError) as error:
+                    raise ValidationError("郵件入帳起始日必須是有效日期時間") from error
+                current["mail_import_after"] = cutoff.isoformat(timespec="seconds").replace("+00:00", "Z")
         with self.connect() as db:
             db.executemany("""INSERT INTO app_settings(key,value,updated_at) VALUES(?,?,?)
                 ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at""",
-                [(key,str(value),utc_now()) for key,value in current.items()])
+                [(key,"" if value is None else str(value),utc_now()) for key,value in current.items()])
         return current
 
-    def upsert_mail_metadata(self, event: dict[str, Any]) -> None:
+    def upsert_mail_metadata(self, event: dict[str, Any]) -> bool:
         mail_id = self._integer(event, "mail_id", 1)
         mail_type = self._required_text(event, "mail_type")
         received_raw = self._integer(event, "mail_received") if event.get("mail_received") else 0
-        received_at = None
-        if received_raw > 621355968000000000:
-            received_at = datetime.fromtimestamp((received_raw-621355968000000000)/10_000_000,
-                                                timezone.utc).isoformat().replace("+00:00","Z")
-        elif received_raw > 1_000_000_000:
-            divisor = 1000 if received_raw > 1_000_000_000_000 else 1
-            received_at = datetime.fromtimestamp(received_raw/divisor, timezone.utc).isoformat().replace("+00:00","Z")
+        received = _mail_datetime(received_raw)
+        received_at = received.isoformat().replace("+00:00","Z") if received else None
+        cutoff = self.get_settings().get("mail_import_after")
+        if not self._mail_import_allowed(event, cutoff):
+            return False
         now = self._optional_text(event,"captured_at") or utc_now()
         with self.connect() as db:
             db.execute("""INSERT INTO market_mails(mail_id,mail_type,received_raw,received_at,location_id,captured_at,updated_at)
@@ -406,6 +459,7 @@ class Database:
                 received_raw=excluded.received_raw,received_at=COALESCE(excluded.received_at,market_mails.received_at),
                 location_id=excluded.location_id,updated_at=excluded.updated_at""",
                 (mail_id,mail_type,received_raw,received_at,self._optional_text(event,"location_id"),now,now))
+        return True
 
     def list_market_mails(self, limit: int = 100) -> list[dict[str, Any]]:
         with self.connect() as db:
@@ -419,11 +473,13 @@ class Database:
             value=dict(row); value["location_name"]=location_name(value.get("location_id")); result.append(value)
         return result
 
-    def resolve_market_mail(self, event: dict[str, Any]) -> None:
+    def resolve_market_mail(self, event: dict[str, Any]) -> bool:
         mail_id = self._integer(event, "mail_id", 1)
         state = self._required_text(event, "mail_state")
         if state not in {"no_trade", "parse_error", "ignored"}:
             raise ValidationError("mail_state 必須是 no_trade、parse_error 或 ignored")
+        if not self._mail_import_allowed(event, self.get_settings().get("mail_import_after")):
+            return False
         now = self._optional_text(event,"captured_at") or utc_now()
         mail_type = self._optional_text(event,"mail_type") or "UNKNOWN"
         content = self._optional_text(event,"raw_params")
@@ -434,6 +490,7 @@ class Database:
                 mail_type=excluded.mail_type,location_id=COALESCE(excluded.location_id,market_mails.location_id),
                 content=excluded.content,state=excluded.state,updated_at=excluded.updated_at""",
                 (mail_id,mail_type,self._optional_text(event,"location_id"),content or message,state,now,now))
+        return True
 
     @staticmethod
     def _enrich(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
@@ -514,6 +571,23 @@ class Database:
             cursor=db.execute("UPDATE transactions SET deleted_at=?,updated_at=? WHERE id=? AND deleted_at IS NULL",(utc_now(),utc_now(),transaction_id))
             if cursor.rowcount: self._rebuild_snapshots(db)
             return cursor.rowcount>0
+
+    def clear_ledger(self) -> dict[str, int]:
+        """Permanently remove ledger records while retaining settings and caches."""
+        with self.connect() as db:
+            counts = {
+                "transactions": int(db.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]),
+                "projects": int(db.execute("SELECT COUNT(*) FROM projects").fetchone()[0]),
+                "mails": int(db.execute("SELECT COUNT(*) FROM market_mails").fetchone()[0]),
+                "snapshots": int(db.execute("SELECT COUNT(*) FROM cost_snapshots").fetchone()[0]),
+            }
+            # Explicit child-first deletes also work for databases upgraded from
+            # old versions where foreign-key cascade metadata may differ.
+            for table in ("project_items", "project_materials", "cost_snapshot_items",
+                          "cost_snapshots", "market_mails", "projects", "transactions", "purchases"):
+                db.execute(f"DELETE FROM {table}")
+            db.execute("DELETE FROM sqlite_sequence WHERE name IN ('projects','cost_snapshots','transactions','purchases')")
+        return counts
 
     def list_snapshots(self, *, limit: int=40) -> list[dict[str,Any]]:
         with self.connect() as db:

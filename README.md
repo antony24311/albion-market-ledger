@@ -76,6 +76,8 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\build-windows.ps1
 ```
 
+ExitLag 會在 Npcap 取得流量前先封裝／加密 Albion 資料，因此被動捕捉器無法解析其遊戲通道。使用本工具時必須完全關閉 ExitLag，再重新啟動 Albion 與捕捉器；`scripts\start-windows-active-network.ps1` 會在偵測到 ExitLag 時停止並顯示原因。
+
 ## macOS（Apple Silicon／Intel）
 
 1. 確認 `python3 --version` 為 3.10 以上；若沒有，可從 [python.org](https://www.python.org/downloads/macos/) 安裝。

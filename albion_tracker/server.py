@@ -235,11 +235,11 @@ class TrackerHandler(BaseHTTPRequestHandler):
                     self.server.database.insert_warning(event)
                     self._send_json({"ok": True})
                 elif event_type == "mail_metadata":
-                    self.server.database.upsert_mail_metadata(event)
-                    self._send_json({"ok": True})
+                    accepted = self.server.database.upsert_mail_metadata(event)
+                    self._send_json({"ok": True, "accepted": accepted})
                 elif event_type == "mail_resolution":
-                    self.server.database.resolve_market_mail(event)
-                    self._send_json({"ok": True})
+                    accepted = self.server.database.resolve_market_mail(event)
+                    self._send_json({"ok": True, "accepted": accepted})
                 else:
                     raise ValidationError("不支援的事件 type")
                 return
@@ -305,6 +305,13 @@ class TrackerHandler(BaseHTTPRequestHandler):
     def do_DELETE(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
         try:
+            if path == "/api/ledger":
+                payload = self._read_json()
+                if payload.get("confirmation") != "CLEAR_LEDGER":
+                    raise ValidationError("請輸入正確的清空確認文字")
+                counts = self.server.database.clear_ledger()
+                self._send_json({"ok": True, "deleted": counts})
+                return
             if path.startswith("/api/projects/"):
                 found = self.server.database.delete_project(int(path.removeprefix("/api/projects/")))
                 label = "專案"

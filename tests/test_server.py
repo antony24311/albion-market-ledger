@@ -28,12 +28,13 @@ class ServerTests(unittest.TestCase):
         self.thread.join(timeout=2)
         self.temp.cleanup()
 
-    def request(self, path, payload=None):
+    def request(self, path, payload=None, method=None):
         data = None if payload is None else json.dumps(payload).encode()
         request = urllib.request.Request(
             self.base + path,
             data=data,
             headers={"Content-Type": "application/json"} if data else {},
+            method=method,
         )
         with urllib.request.urlopen(request, timeout=2) as response:
             return response.status, json.loads(response.read())
@@ -105,6 +106,24 @@ class ServerTests(unittest.TestCase):
         })
         self.assertEqual(status, 200)
         self.assertEqual([route["id"] for route in comparison["routes"]], ["tier", "enchantment"])
+
+    def test_mail_cutoff_setting_and_clear_ledger_api(self):
+        status, saved = self.request("/api/settings", {
+            "mail_import_after": "2026-08-15T00:00:00Z",
+        }, method="PUT")
+        self.assertEqual(status, 200)
+        self.assertEqual(saved["settings"]["mail_import_after"], "2026-08-15T00:00:00Z")
+        self.request("/api/transactions", {
+            "direction": "buy", "transaction_kind": "instant", "item_id": "T4_BAG",
+            "quantity": 1, "unit_price": 10,
+        })
+        status, cleared = self.request("/api/ledger", {
+            "confirmation": "CLEAR_LEDGER",
+        }, method="DELETE")
+        self.assertEqual(status, 200)
+        self.assertEqual(cleared["deleted"]["transactions"], 1)
+        _, transactions = self.request("/api/transactions")
+        self.assertEqual(transactions["items"], [])
 
 
 if __name__ == "__main__":

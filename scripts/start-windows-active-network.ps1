@@ -30,6 +30,15 @@ if (-not $ipConfig) {
 $adapter = Get-NetAdapter -InterfaceIndex $ipConfig.InterfaceIndex
 $device = "\Device\NPF_$($adapter.InterfaceGuid.ToString().ToUpperInvariant())"
 
+# ExitLag encapsulates Albion traffic before it reaches Npcap. Capturing the
+# relay's dynamic port only exposes the encrypted tunnel, which the passive
+# Photon parser intentionally cannot decrypt.
+$exitLagProcesses = @(Get-Process -Name "ExitLag" -ErrorAction SilentlyContinue)
+if ($exitLagProcesses.Count -gt 0) {
+    throw "ExitLag is running. Its encrypted tunnel cannot be parsed. Close ExitLag completely, restart Albion, then run this script again."
+}
+$capturePort = 5056
+
 $python = Get-Command py -ErrorAction SilentlyContinue
 if ($python) {
     $pythonExe = $python.Source
@@ -55,13 +64,14 @@ if (-not $trackerReady) {
 Write-Host "Npcap: $($npcap.Status)" -ForegroundColor Green
 Write-Host "Monitoring adapter: $($adapter.Name) ($($ipConfig.IPv4Address.IPAddress))" -ForegroundColor Green
 Write-Host "Device: $device"
+Write-Host "Game traffic port: $capturePort" -ForegroundColor Green
 Write-Host "Tracker: http://127.0.0.1:8765"
 Write-Host "Open Albion, enter the marketplace, then load offers/requests before placing a transaction." -ForegroundColor Yellow
 Write-Host "Press Ctrl+C to stop capture."
 
 Push-Location $projectRoot
 try {
-    & $capture -devices $device -api "http://127.0.0.1:8765"
+    & $capture -devices $device -port $capturePort -api "http://127.0.0.1:8765"
 } finally {
     Pop-Location
 }

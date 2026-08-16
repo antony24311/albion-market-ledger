@@ -11,7 +11,7 @@ $VenvPython = Join-Path $Venv "Scripts\python.exe"
 $Output = Join-Path $ProjectRoot "dist\AlbionMarketLedger.exe"
 
 $Go = Get-Command go -ErrorAction SilentlyContinue
-if (-not $Go) { throw "Go 1.24 or newer is required to build the capture component." }
+if (-not $Go) { throw "Go 1.26 or newer is required to build the Windows App." }
 $Python = Get-Command python -ErrorAction SilentlyContinue
 if (-not $Python) { throw "Python 3.10 or newer is required to build the desktop app." }
 

@@ -123,6 +123,36 @@ def find_edge() -> Path | None:
     return next((candidate for candidate in candidates if candidate.is_file()), None)
 
 
+def edge_app_process_ids(profile: Path) -> list[int]:
+    """Find a relaunched Edge App process that belongs to this application."""
+    command = (
+        "$profile=$env:ALBION_LEDGER_EDGE_PROFILE; "
+        "$url=$env:ALBION_LEDGER_APP_URL; "
+        "Get-CimInstance Win32_Process -Filter \"Name = 'msedge.exe'\" | "
+        "Where-Object {$_.CommandLine -and $_.CommandLine.Contains($profile) -and "
+        "$_.CommandLine.Contains(('--app=' + $url))} | "
+        "ForEach-Object {$_.ProcessId}"
+    )
+    environment = os.environ.copy()
+    environment["ALBION_LEDGER_EDGE_PROFILE"] = str(profile)
+    environment["ALBION_LEDGER_APP_URL"] = APP_URL
+    try:
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            creationflags=CREATE_NO_WINDOW,
+            check=False,
+            env=environment,
+        )
+        if result.returncode != 0:
+            return []
+        return [int(line) for line in result.stdout.splitlines() if line.strip().isdigit()]
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return []
+
+
 class DesktopRuntime:
     def __init__(self) -> None:
         self.resources = resource_root()
@@ -140,6 +170,7 @@ class DesktopRuntime:
         sys.stderr = self.runtime_log
 
     def start_server(self) -> None:
+        print(f"Starting tracker service at {APP_URL}.")
         if health_ready():
             print("Using the tracker service already listening on port 8765.")
             return
@@ -147,6 +178,7 @@ class DesktopRuntime:
         self.server, _ = serve_in_thread(database, "127.0.0.1", 8765, self.resources / "web")
         for _ in range(30):
             if health_ready():
+                print("Tracker service is ready on port 8765.")
                 return
             time.sleep(0.1)
         raise RuntimeError("Tracker service did not become ready on port 8765.")
@@ -188,12 +220,14 @@ class DesktopRuntime:
                 "Packet capture could not start. Confirm that Npcap is installed in WinPcap-compatible mode.\n\n"
                 f"Log: {self.log_directory / 'capture.log'}"
             )
+        print("Packet capture is running.")
 
     def open_window(self) -> None:
         edge = find_edge()
         if not edge:
             raise RuntimeError("Microsoft Edge was not found. Install or repair Edge, then retry.")
         profile = self.app_data / "EdgeProfile"
+        print(f"Opening desktop window at {APP_URL}.")
         process = subprocess.Popen(
             [
                 str(edge),
@@ -202,10 +236,38 @@ class DesktopRuntime:
                 "--no-first-run",
                 "--disable-session-crashed-bubble",
                 "--window-size=1440,960",
+                # Edge can otherwise relaunch itself to remove Windows compatibility
+                # settings. Waiting on the original process would then stop our server
+                # while the replacement window is still open.
+                "--edge-skip-compat-layer-relaunch",
             ],
             creationflags=CREATE_NO_WINDOW,
         )
-        process.wait()
+        time.sleep(1)
+        if process.poll() is None:
+            print(f"Desktop window is running (PID {process.pid}).")
+            process.wait()
+            print("Desktop window was closed.")
+            return
+
+        # If Edge reused or relaunched a profile process despite the flag above,
+        # keep the tracker alive for that real App window instead of stopping it.
+        process_ids: list[int] = []
+        for _ in range(20):
+            process_ids = edge_app_process_ids(profile)
+            if process_ids:
+                break
+            time.sleep(0.25)
+        if not process_ids:
+            raise RuntimeError(
+                "Microsoft Edge exited before the desktop window opened.\n\n"
+                f"Open {APP_URL} manually and check {self.log_directory / 'app.log'}."
+            )
+
+        print(f"Edge relaunched or reused the desktop window (PID {process_ids[0]}).")
+        while edge_app_process_ids(profile):
+            time.sleep(2)
+        print("Desktop window was closed.")
 
     def stop(self) -> None:
         if self.capture_handle:
